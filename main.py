@@ -5,6 +5,7 @@ import json
 import os
 import random
 import sys
+import threading
 import tkinter as tk
 from datetime import datetime, time as dtime
 
@@ -216,6 +217,8 @@ class App:
             self._settings,
             on_close=self._on_close,
             on_settings=self._on_settings,
+            on_drink=self._record_water,
+            on_minimize=self._on_minimize_to_tray,
         )
 
         self._root.deiconify()
@@ -327,6 +330,7 @@ class App:
         self._clock.set_water(
             self._tracker.get_today_total(),
             self._tracker.get_target(),
+            self._tracker.get_last_drink_time(),
         )
 
     # ── 用藥提醒 ─────────────────────────────────────
@@ -409,11 +413,64 @@ class App:
 
     # ── 關閉與設定 ────────────────────────────────────
 
+    def _on_minimize_to_tray(self):
+        self._root.withdraw()
+        self._show_tray_icon()
+
+    def _show_tray_icon(self):
+        try:
+            from PIL import Image, ImageDraw
+            import pystray
+        except ImportError:
+            self._root.deiconify()
+            return
+
+        img = Image.new("RGBA", (64, 64), (15, 23, 42, 0))
+        draw = ImageDraw.Draw(img)
+        draw.ellipse([6, 6, 58, 58], fill=(239, 68, 68, 255))
+        draw.text((17, 12), "❤", fill=(255, 255, 255))
+
+        def on_show(icon, item):
+            icon.stop()
+
+        def on_quit(icon, item):
+            icon.stop()
+            self._root.after(0, self._on_close)
+
+        menu = pystray.Menu(
+            pystray.MenuItem("顯示", on_show, default=True),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("離開", on_quit),
+        )
+
+        icon = pystray.Icon("health_clock", img, "健康小幫手", menu)
+
+        def run_tray():
+            icon.run()
+            self._root.after(0, self._hide_tray_icon)
+
+        threading.Thread(target=run_tray, daemon=True).start()
+
+    def _hide_tray_icon(self):
+        self._root.deiconify()
+        self._root.lift()
+        self._root.focus_force()
+
     def _on_close(self):
-        x, y = self._clock.get_position()
-        self._settings["window_x"] = x
-        self._settings["window_y"] = y
-        save_settings(self._settings)
+        try:
+            pass
+        except Exception:
+            pass
+        try:
+            x, y, w, h = self._clock.get_position()
+            self._settings["window_x"] = x
+            self._settings["window_y"] = y
+            self._settings["window_w"] = w
+            self._settings["window_h"] = h
+            save_settings(self._settings)
+        except Exception:
+            pass
+        self._clock.destroy()
         self._scheduler.cancel_all()
         self._sys_monitor.shutdown()
         self._root.destroy()

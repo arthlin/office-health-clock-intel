@@ -1,7 +1,7 @@
 # config.py — 全域顏色、字體、常數
 
 # 視窗尺寸
-WINDOW_WIDTH  = 400
+WINDOW_WIDTH  = 160
 WINDOW_HEIGHT = 420
 WINDOW_BORDER = 2
 
@@ -147,6 +147,8 @@ DEFAULT_SETTINGS = {
     "med_minute": 40,
     "window_x": -1,
     "window_y": -1,
+    "window_w": 160,
+    "window_h": 420,
 }
 
 # 喝水快選量（ml）

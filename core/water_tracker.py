@@ -53,6 +53,12 @@ class WaterTracker:
         self._ensure_today()
         return list(self._today_records)
 
+    def get_last_drink_time(self) -> str | None:
+        self._ensure_today()
+        if not self._today_records:
+            return None
+        return self._today_records[-1]["time"]
+
     def check_and_reset_if_new_day(self):
         """每秒 tick 中呼叫，跨日自動重置。"""
         today = date.today().isoformat()

@@ -209,7 +209,7 @@ class SystemMonitor:
     # ── CPU 溫度 ──────────────────────────────────────────
 
     def _update_cpu_temp(self):
-        """直接透過 LibreHardwareMonitor DLL 讀取 CPU 溫度。"""
+        """讀取 CPU 溫度，僅接受 > 0 且 < 150 的有效值。"""
         # 優先嘗試 LHM（不需要管理員權限即可讀取大部分感測器）
         if self._has_lhm and self._lhm_computer:
             try:
@@ -220,16 +220,18 @@ class SystemMonitor:
                         best = None
                         for sensor in hw.Sensors:
                             if sensor.SensorType == SensorType.Temperature and sensor.Value is not None:
+                                val = float(sensor.Value)
+                                if not (0 < val < 150):
+                                    continue
                                 name = sensor.Name.lower()
-                                # 優先 Package / Core / CPU 溫度，排除 Distance / Hotspot
                                 if "distance" in name or "hotspot" in name:
                                     continue
                                 if "package" in name:
-                                    self.cpu_temp = float(sensor.Value)
+                                    self.cpu_temp = val
                                     return
-                                if "core" in name or "cpu" in name:
-                                    if best is None or float(sensor.Value) > best:
-                                        best = float(sensor.Value)
+                                if "core" in name or "cpu" in name or "tctl" in name or "tdie" in name:
+                                    if best is None or val > best:
+                                        best = val
                         if best is not None:
                             self.cpu_temp = best
                             return
@@ -242,28 +244,32 @@ class SystemMonitor:
                 with open(self.CPU_TEMP_FILE, "r", encoding="utf-8-sig") as f:
                     val = f.read().strip()
                 if val and val != "error":
-                    self.cpu_temp = float(val)
-                    return
+                    temp = float(val)
+                    if 0 < temp < 150:
+                        self.cpu_temp = temp
+                        return
         except (ValueError, OSError):
             pass
 
-        # 最後後備：嘗試 WMI（需要管理員權限）
-        try:
-            import subprocess
-            result = subprocess.run(
-                ["powershell", "-NoProfile", "-Command",
-                 "Get-CimInstance MSAcpi_ThermalZoneTemperature -Namespace 'root/WMI' -ErrorAction Stop | Select-Object -First 1 -ExpandProperty CurrentTemperature"],
-                capture_output=True, text=True, timeout=5,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            raw = result.stdout.strip()
-            if raw:
-                celsius = float(raw) / 10.0 - 273.15
-                if 0 < celsius < 150:
-                    self.cpu_temp = round(celsius, 1)
-                    return
-        except Exception:
-            pass
+        # 後備：WMI（某些系統需要管理員權限）
+        for cmd in [
+            "Get-CimInstance MSAcpi_ThermalZoneTemperature -Namespace 'root/WMI' -ErrorAction Stop | Select-Object -First 1 -ExpandProperty CurrentTemperature",
+            "Get-CimInstance Win32_PerfFormattedData_Counters_ThermalZoneInformation -ErrorAction Stop | Select-Object -First 1 -ExpandProperty Temperature",
+        ]:
+            try:
+                result = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", cmd],
+                    capture_output=True, text=True, timeout=5,
+                    creationflags=subprocess.CREATE_NO_WINDOW,
+                )
+                raw = result.stdout.strip()
+                if raw:
+                    celsius = float(raw) / 10.0 - 273.15
+                    if 0 < celsius < 150:
+                        self.cpu_temp = round(celsius, 1)
+                        return
+            except Exception:
+                pass
 
     # ── CPU 使用率 ──────────────────────────────────────
 

@@ -52,8 +52,8 @@ call :EnsureVenv
 if errorlevel 1 exit /b 1
 
 call :InstallPackages
-call :EnsureStartupShortcut
-call :StartCpuHelper
+rem call :EnsureStartupShortcut
+rem call :StartCpuHelper
 
 echo [start] Starting app...
 if exist ".venv\Scripts\pythonw.exe" (

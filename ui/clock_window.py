@@ -301,11 +301,13 @@ class ClockWindow:
     - 圖標化系統監控
     """
 
-    def __init__(self, root: tk.Tk, settings: dict, on_close, on_settings):
+    def __init__(self, root: tk.Tk, settings: dict, on_close, on_settings, on_drink=None, on_minimize=None):
         self._root = root
         self._settings = settings
         self._on_close = on_close
         self._on_settings = on_settings
+        self._on_drink = on_drink
+        self._on_minimize = on_minimize
 
         self._exercise_remaining = settings.get("exercise_interval_minutes", 50) * 60
         self._exercise_interval = settings.get("exercise_interval_minutes", 50) * 60
@@ -340,10 +342,16 @@ class ClockWindow:
 
         self._particle_system = None
         self._water_goal_celebrated = False
+        self._last_drink_time = None
+        self._sys_collapsed = False
 
         self._build()
         self._setup_particles()
         self._place_window()
+
+    def _show_water_menu(self, event):
+        if hasattr(self, "_water_menu"):
+            self._water_menu.tk_popup(event.x_root, event.y_root)
 
     # ── 公開 API ──────────────────────────────────────────
 
@@ -360,9 +368,10 @@ class ClockWindow:
     def set_exercise_remaining(self, seconds: int):
         self._exercise_remaining = seconds
 
-    def set_water(self, total_ml: int, target_ml: int):
+    def set_water(self, total_ml: int, target_ml: int, last_time: str | None = None):
         self._water_total = total_ml
         self._water_target = target_ml
+        self._last_drink_time = last_time
 
     def set_med_taken(self, taken: bool):
         self._med_taken = taken
@@ -392,8 +401,8 @@ class ClockWindow:
         self._weather_description = getattr(snapshot, "description", "--") or "--"
         self._update_weather_display()
 
-    def get_position(self) -> tuple[int, int]:
-        return self._root.winfo_x(), self._root.winfo_y()
+    def get_position(self) -> tuple[int, int, int, int]:
+        return self._root.winfo_x(), self._root.winfo_y(), self._root.winfo_width(), self._root.winfo_height()
 
     # ── 建構 UI ───────────────────────────────────────────
 
@@ -403,6 +412,7 @@ class ClockWindow:
         root.attributes("-topmost", True)
         root.configure(bg=config.BORDER_COLOR)
         root.resizable(False, False)
+        root.bind("<Map>", self._on_restore)
 
         # 外層脈衝邊框
         self._border_frame = tk.Frame(root, bg=config.BORDER_PULSE_1,
@@ -463,12 +473,21 @@ class ClockWindow:
         bar.pack(fill="x")
         bar.pack_propagate(False)
 
+        # 縮小按鈕
+        min_btn = tk.Label(bar, text="─", font=("Segoe UI", 10, "bold"),
+                           fg=config.TEXT_SECONDARY, bg=config.BG_SECONDARY,
+                           cursor="hand2", padx=8, pady=2)
+        min_btn.pack(side="left", padx=(0, 0))
+        min_btn.bind("<Button-1>", lambda e: self._minimize() if self._on_minimize is None else self._on_minimize())
+        min_btn.bind("<Enter>", lambda e: min_btn.config(fg=config.TEXT_PRIMARY, bg=config.BG_TERTIARY))
+        min_btn.bind("<Leave>", lambda e: min_btn.config(fg=config.TEXT_SECONDARY, bg=config.BG_SECONDARY))
+
         # 關閉按鈕
         close_btn = tk.Label(bar, text="✕", font=("Segoe UI", 10, "bold"),
                              fg=config.CLOSE_COLOR, bg=config.BG_SECONDARY,
                              cursor="hand2", padx=8, pady=2)
-        close_btn.pack(side="left", padx=(8, 0))
-        close_btn.bind("<Button-1>", lambda e: (self.destroy(), self._on_close()))
+        close_btn.pack(side="left", padx=(0, 8))
+        close_btn.bind("<Button-1>", lambda e: self._on_close())
         close_btn.bind("<Enter>", lambda e: close_btn.config(fg=config.CLOSE_HOVER, bg=config.BG_TERTIARY))
         close_btn.bind("<Leave>", lambda e: close_btn.config(fg=config.CLOSE_COLOR, bg=config.BG_SECONDARY))
 
@@ -511,7 +530,16 @@ class ClockWindow:
         water_f.pack(side="left", padx=(0, 12))
         self._water_indicator = CircleIndicator(water_f, size=64, color=config.COLOR_WATER, bg_color=config.SYS_BAR_BG)
         self._water_indicator.pack()
-        tk.Label(water_f, text="💧 喝水", font=config.FONT_SMALL, fg=config.TEXT_SECONDARY, bg=config.BG_COLOR).pack(pady=(2, 0))
+        lbl_water = tk.Label(water_f, text="💧 喝水", font=config.FONT_SMALL, fg=config.TEXT_SECONDARY, bg=config.BG_COLOR)
+        lbl_water.pack(pady=(2, 0))
+        if self._on_drink:
+            self._water_menu = tk.Menu(self._root, tearoff=False, bg=config.BG_SECONDARY,
+                                       fg=config.TEXT_PRIMARY, activebackground=config.BG_TERTIARY,
+                                       activeforeground=config.TEXT_PRIMARY, font=config.FONT_BTN)
+            for ml in [200, 350, 500]:
+                self._water_menu.add_command(label=f"+{ml} ml", command=lambda m=ml: self._on_drink(m))
+            for widget in (self._water_indicator.canvas, lbl_water):
+                widget.bind("<Button-3>", self._show_water_menu)
 
         timer_f = tk.Frame(left, bg=config.BG_COLOR)
         timer_f.pack(side="left", padx=(0, 12))
@@ -568,27 +596,31 @@ class ClockWindow:
         self._lbl_med.pack(side="right")
 
     def _build_sys_area(self):
-        # 分隔線
-        tk.Frame(self._main, bg=config.DIVIDER_LIGHT, height=1).pack(fill="x", padx=16, pady=(0, 6))
+        self._sys_sep = tk.Frame(self._main, bg=config.DIVIDER_LIGHT, height=1)
+        self._sys_sep.pack(fill="x", padx=16, pady=(0, 6))
 
-        # 系統監控標題
         sys_header = tk.Frame(self._main, bg=config.BG_COLOR)
         sys_header.pack(fill="x", padx=16, pady=(0, 4))
-        
+
+        self._sys_toggle = tk.Label(sys_header, text="▼", font=("Segoe UI", 7),
+                                    fg=config.TEXT_MUTED, bg=config.BG_COLOR, cursor="hand2")
+        self._sys_toggle.pack(side="left", padx=(0, 4))
+        self._sys_toggle.bind("<Button-1>", lambda e: self._toggle_sys())
+
         tk.Label(sys_header, text="📊 系統監控", font=config.FONT_SYS_CARD_TITLE,
                   fg=config.TEXT_SECONDARY, bg=config.BG_COLOR).pack(side="left")
 
-        grid = tk.Frame(self._main, bg=config.BG_COLOR)
-        grid.pack(fill="x", padx=16, pady=(0, 6))
-        grid.columnconfigure(0, weight=1)
-        grid.columnconfigure(1, weight=1)
+        self._sys_grid = tk.Frame(self._main, bg=config.BG_COLOR)
+        self._sys_grid.pack(fill="x", padx=16, pady=(0, 6))
+        self._sys_grid.columnconfigure(0, weight=1)
+        self._sys_grid.columnconfigure(1, weight=1)
 
-        self._cpu_card = SystemMetricCard(grid, "CPU", "🧠", config.SYS_TEMP_OK)
-        self._cpu_util_card = SystemMetricCard(grid, "CPU%", "📊", config.SYS_BAR_CPU)
-        self._gpu_card = SystemMetricCard(grid, "GPU", "🎮", config.SYS_TEMP_OK)
-        self._ram_card = SystemMetricCard(grid, "RAM", "🧩", config.SYS_BAR_RAM)
-        self._vram_card = SystemMetricCard(grid, "VRAM", "🖼", config.SYS_BAR_VRAM)
-        self._cuda_card = SystemMetricCard(grid, "CUDA", "⚡", config.SYS_BAR_CUDA)
+        self._cpu_card = SystemMetricCard(self._sys_grid, "CPU", "🧠", config.SYS_TEMP_OK)
+        self._cpu_util_card = SystemMetricCard(self._sys_grid, "CPU%", "📊", config.SYS_BAR_CPU)
+        self._gpu_card = SystemMetricCard(self._sys_grid, "GPU", "🎮", config.SYS_TEMP_OK)
+        self._ram_card = SystemMetricCard(self._sys_grid, "RAM", "🧩", config.SYS_BAR_RAM)
+        self._vram_card = SystemMetricCard(self._sys_grid, "VRAM", "🖼", config.SYS_BAR_VRAM)
+        self._cuda_card = SystemMetricCard(self._sys_grid, "CUDA", "⚡", config.SYS_BAR_CUDA)
 
         self._cpu_card.grid(row=0, column=0, sticky="ew", padx=(0, 4), pady=(0, 4))
         self._cpu_util_card.grid(row=0, column=1, sticky="ew", padx=(4, 0), pady=(0, 4))
@@ -596,6 +628,18 @@ class ClockWindow:
         self._ram_card.grid(row=1, column=1, sticky="ew", padx=(4, 0), pady=(0, 4))
         self._vram_card.grid(row=2, column=0, sticky="ew", padx=(0, 4), pady=(0, 4))
         self._cuda_card.grid(row=2, column=1, sticky="ew", padx=(4, 0), pady=(0, 4))
+
+    def _toggle_sys(self):
+        self._sys_collapsed = not self._sys_collapsed
+        if self._sys_collapsed:
+            self._sys_grid.pack_forget()
+            self._sys_sep.pack_forget()
+            self._sys_toggle.config(text="▶")
+        else:
+            self._sys_sep.pack(fill="x", padx=16, pady=(0, 6))
+            self._sys_sep.pack_propagate(False)
+            self._sys_grid.pack(fill="x", padx=16, pady=(0, 6))
+            self._sys_toggle.config(text="▼")
 
     # ── 更新顯示 ──────────────────────────────────────────
 
@@ -629,7 +673,10 @@ class ClockWindow:
     def _update_water_display(self):
         total = self._water_total
         target = self._water_target
-        self._var_water.set(f"{total}/{target}ml")
+        text = f"{total}/{target}ml"
+        if self._last_drink_time:
+            text += f" 上次 {self._last_drink_time}"
+        self._var_water.set(text)
         done = total >= target
         color = config.COLOR_WATER_DONE if done else config.COLOR_WATER
         pct = min(1.0, total / target) if target else 0
@@ -748,6 +795,17 @@ class ClockWindow:
             y = config.WINDOW_HEIGHT // 2
             self._particle_system.emit_confetti(x, y, config.PARTICLE_CONFETTI_COUNT)
 
+    def _minimize(self) -> None:
+        root = self._root
+        root.overrideredirect(False)
+        root.attributes("-topmost", False)
+        root.iconify()
+
+    def _on_restore(self, event=None) -> None:
+        if self._root.wm_state() == "normal":
+            self._root.overrideredirect(True)
+            self._root.attributes("-topmost", True)
+
     def destroy(self) -> None:
         """Clean up particle system callbacks before the root window is destroyed.
 
@@ -847,7 +905,7 @@ class ClockWindow:
             # 解析目前幾何 "WxH+X+Y"
             parts = geo.replace("x", "+").split("+")
             cur_w, cur_h, cur_x, cur_y = int(parts[0]), int(parts[1]), int(parts[2]), int(parts[3])
-            min_w, min_h = 200, 200
+            min_w, min_h = 140, 200
             edge = self._resize_edge
 
             new_x, new_y = cur_x, cur_y
@@ -885,13 +943,11 @@ class ClockWindow:
     def _place_window(self):
         x = self._settings.get("window_x", -1)
         y = self._settings.get("window_y", -1)
-        # 先讓內容自動計算高度
+        w = self._settings.get("window_w", config.WINDOW_WIDTH)
+        h = self._settings.get("window_h", config.WINDOW_HEIGHT)
         self._root.update_idletasks()
-        req_h = self._root.winfo_reqheight()
-        req_w = self._root.winfo_reqwidth()
-        # 至少保持最小尺寸
-        win_w = max(config.WINDOW_WIDTH, req_w)
-        win_h = max(config.WINDOW_HEIGHT, req_h)
+        win_w = max(w, 140)
+        win_h = max(h, 200)
         if x < 0 or y < 0:
             sw = self._root.winfo_screenwidth()
             sh = self._root.winfo_screenheight()

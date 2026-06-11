@@ -72,15 +72,21 @@ class WeatherService:
         try:
             return self._fetch_weather(location)
         except Exception:
-            return WeatherSnapshot(
-                location=str(location.get("name") or "--"),
-                icon="⛅",
-                temperature_c=None,
-                wind_kmh=None,
-                rain_mm=None,
-                description="無法取得",
-                updated_at=datetime.now(),
-            )
+            pass
+        # 備援：嘗試 wttr.in
+        try:
+            return self._fetch_weather_wttr(location)
+        except Exception:
+            pass
+        return WeatherSnapshot(
+            location=str(location.get("name") or "--"),
+            icon="⛅",
+            temperature_c=None,
+            wind_kmh=None,
+            rain_mm=None,
+            description="無法取得",
+            updated_at=datetime.now(),
+        )
 
     def _detect_location(self) -> dict[str, object] | None:
         location = self._detect_location_via_ip()
@@ -97,6 +103,7 @@ class WeatherService:
 
     def _detect_location_via_ip(self) -> dict[str, object] | None:
         urls = [
+            "http://ip-api.com/json/",
             "https://ipapi.co/json/",
             "https://ipwho.is/",
         ]
@@ -114,8 +121,38 @@ class WeatherService:
                 if lat is None or lon is None:
                     continue
 
-                city = payload.get("city") or payload.get("region") or "當地"
-                name = str(city)
+                city = str(payload.get("city") or "")
+                region = str(payload.get("regionName") or payload.get("region") or "")
+                district = str(payload.get("district") or "")
+                country = str(payload.get("country") or "")
+                # 英轉中對照表（縣市）
+                region_cn = {
+                    "New Taipei City": "新北市", "Taipei City": "台北市", "Taichung City": "台中市",
+                    "Kaohsiung City": "高雄市", "Tainan City": "台南市", "Taoyuan City": "桃園市",
+                    "Keelung City": "基隆市", "Hsinchu City": "新竹市", "Chiayi City": "嘉義市",
+                    "Hsinchu County": "新竹縣", "Miaoli County": "苗栗縣", "Changhua County": "彰化縣",
+                    "Nantou County": "南投縣", "Yunlin County": "雲林縣", "Chiayi County": "嘉義縣",
+                    "Pingtung County": "屏東縣", "Yilan County": "宜蘭縣", "Hualien County": "花蓮縣",
+                    "Taitung County": "台東縣", "Penghu County": "澎湖縣",
+                }.get(region, region)
+                # 英轉中對照表（鄉鎮市區）— ip-api.com 的 city 欄位
+                district_cn = {
+                    "Banqiao": "板橋區", "Zhonghe": "中和區", "Yonghe": "永和區", "Xindian": "新店區",
+                    "Xizhi": "汐止區", "Shulin": "樹林區", "Tucheng": "土城區", "Sanchong": "三重區",
+                    "Luzhou": "蘆洲區", "Wugu": "五股區", "Taishan": "泰山區", "Linkou": "林口區",
+                    "Shenkeng": "深坑區", "Shiding": "石碇區", "Pinglin": "平溪區", "Sanxia": "三峽區",
+                    "Yingge": "鶯歌區", "Danshui": "淡水區", "Bali": "八里區", "Wanli": "萬里區",
+                    "Jinshan": "金山區", "Gongliao": "貢寮區", "Shuangxi": "雙溪區", "Ruifang": "瑞芳區",
+                    "Pingxi": "平溪區", "Taipei": "台北市", "Taichung": "台中市", "Kaohsiung": "高雄市",
+                    "Tainan": "台南市", "Taoyuan": "桃園市", "Hsinchu": "新竹市", "Chiayi": "嘉義市",
+                    "Keelung": "基隆市",
+                }.get(city, "")
+                if district_cn:
+                    name = f"{region_cn}{district_cn}"
+                elif district:
+                    name = f"{region_cn}{district}"
+                else:
+                    name = region_cn
 
                 timezone = payload.get("timezone") or "auto"
                 if isinstance(timezone, dict):
@@ -198,9 +235,20 @@ class WeatherService:
     @staticmethod
     def _http_get_json(url: str, timeout: int = 5) -> dict | None:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            data = resp.read().decode("utf-8")
-        return json.loads(data)
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = resp.read().decode("utf-8")
+            return json.loads(data)
+        except urllib.error.URLError:
+            # SSL/TLS 連線問題時改用未驗證的 context 重試
+            try:
+                import ssl
+                ctx = ssl._create_unverified_context()
+                with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+                    data = resp.read().decode("utf-8")
+                return json.loads(data)
+            except Exception:
+                return None
 
     def _fetch_weather(self, location: dict[str, object]) -> WeatherSnapshot:
         lat = float(location["lat"])
@@ -215,7 +263,9 @@ class WeatherService:
         }
         url = "https://api.open-meteo.com/v1/forecast?" + urllib.parse.urlencode(params)
         payload = self._http_get_json(url, timeout=8)
-        current = payload.get("current", {}) if payload else {}
+        if not payload:
+            raise RuntimeError("open-meteo unreachable")
+        current = payload.get("current", {})
 
         temp = current.get("temperature_2m")
         wind = current.get("wind_speed_10m")
@@ -232,6 +282,39 @@ class WeatherService:
             description=desc,
             updated_at=datetime.now(),
         )
+
+    def _fetch_weather_wttr(self, location: dict[str, object]) -> WeatherSnapshot:
+        lat = float(location["lat"])
+        lon = float(location["lon"])
+        for scheme in ["https", "http"]:
+            try:
+                url = f"{scheme}://wttr.in/{lat},{lon}?format=j1"
+                req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+                try:
+                    with urllib.request.urlopen(req, timeout=8) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                except Exception:
+                    import ssl
+                    ctx = ssl._create_unverified_context()
+                    with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                cc = data.get("current_condition", [{}])[0]
+                temp = cc.get("temp_C")
+                wind = cc.get("windspeedKmph")
+                rain = cc.get("precipMM")
+                desc = (cc.get("weatherDesc") or [{}])[0].get("value", "")
+                return WeatherSnapshot(
+                    location=str(location.get("name") or "當地"),
+                    icon="🌤",
+                    temperature_c=float(temp) if temp is not None else None,
+                    wind_kmh=float(wind) if wind is not None else None,
+                    rain_mm=float(rain) if rain is not None else None,
+                    description=desc or "天氣",
+                    updated_at=datetime.now(),
+                )
+            except Exception:
+                continue
+        raise RuntimeError("wttr.in unreachable")
 
     @staticmethod
     def _weather_code_to_icon(code: int) -> tuple[str, str]:
