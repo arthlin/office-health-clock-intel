@@ -24,7 +24,9 @@ class CircleIndicator:
     def pack(self, **kwargs):
         self.canvas.pack(**kwargs)
         
-    def update(self, progress, text="", sub_text=""):
+    def update(self, progress, text="", sub_text="", color=None):
+        if color is not None:
+            self.color = color
         self.target_progress = min(1.0, max(0.0, progress))
         if self.animation_id is None:
             self._animate_progress()
@@ -576,7 +578,7 @@ class ClockWindow:
 
         timer_f = tk.Frame(left, bg=config.BG_COLOR)
         timer_f.pack(side="left", padx=(0, 12))
-        self._timer_indicator = GaugeIndicator(timer_f, size=64, color=config.COLOR_TIMER)
+        self._timer_indicator = CircleIndicator(timer_f, size=64, color=config.COLOR_TIMER, bg_color=config.SYS_BAR_BG)
         self._timer_indicator.pack()
         lbl_timer = tk.Label(timer_f, text="⏱ 久坐", font=config.FONT_SMALL, fg=config.TEXT_SECONDARY, bg=config.BG_COLOR)
         lbl_timer.pack(pady=(2, 0))
@@ -602,13 +604,17 @@ class ClockWindow:
 
         self._var_weather_location = tk.StringVar(value="天氣")
         self._var_weather_main = tk.StringVar(value="⏳ 載入中...")
+        self._var_weather_temp = tk.StringVar(value="--°C")
+        self._var_weather_detail = tk.StringVar(value="")
         self._var_date = tk.StringVar(value="")
 
         tk.Label(right, textvariable=self._var_weather_location,
                  font=("Segoe UI", 9, "bold"), fg="#60a5fa", bg=config.BG_COLOR).pack(anchor="e")
-        tk.Label(right, textvariable=self._var_weather_main,
-                 font=("Segoe UI", 10), fg="#f8fafc", bg=config.BG_COLOR,
-                 justify="right").pack(anchor="e", pady=(2, 0))
+        tk.Label(right, textvariable=self._var_weather_temp,
+                 font=("Segoe UI", 16, "bold"), fg="#f8fafc", bg=config.BG_COLOR).pack(anchor="e", pady=(1, 0))
+        tk.Label(right, textvariable=self._var_weather_detail,
+                 font=("Segoe UI", 8), fg=config.TEXT_MUTED, bg=config.BG_COLOR,
+                 justify="right").pack(anchor="e")
         tk.Label(right, textvariable=self._var_date,
                  font=("Segoe UI", 8), fg=config.DATE_COLOR, bg=config.BG_COLOR).pack(anchor="e", pady=(4, 0))
 
@@ -824,7 +830,10 @@ class ClockWindow:
             rain_text = f"{self._weather_rain:.1f} mm"
 
         self._var_weather_location.set(f"📍 {self._weather_location}")
-        self._var_weather_main.set(f"{self._weather_icon} {temp_text}\n💨 {wind_text}\n🌧 {rain_text}")
+        self._var_weather_temp.set(f"{self._weather_icon} {temp_text}")
+        self._var_weather_detail.set(f"💨 {wind_text}  🌧 {rain_text}")
+        # 保留舊 var 相容性
+        self._var_weather_main.set(f"{self._weather_icon} {temp_text}")
 
     @staticmethod
     def _temp_color(temp: float) -> str:
