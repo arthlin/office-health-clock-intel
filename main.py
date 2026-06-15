@@ -206,6 +206,7 @@ class App:
         self._exercise_elapsed = 0   # 已坐秒數
         self._exercise_interval_s = self._settings["exercise_interval_minutes"] * 60
         self._exercise_showing = False
+        self._is_standing = False
 
         self._water_showing = False
         self._last_water_remind_time = None   # datetime
@@ -219,6 +220,8 @@ class App:
             on_settings=self._on_settings,
             on_drink=self._record_water,
             on_minimize=self._on_minimize_to_tray,
+            on_stand_up=self._on_stand_up,
+            on_sit_down=self._on_sit_down,
         )
 
         self._root.deiconify()
@@ -268,8 +271,8 @@ class App:
         self._clock.tick()
         self._sync_water_display()
 
-        # 久坐計時
-        if not self._exercise_showing:
+        # 久坐計時（站立中則暫停）
+        if not self._exercise_showing and not self._is_standing:
             self._exercise_elapsed += 1
             remaining = self._exercise_interval_s - self._exercise_elapsed
             self._clock.set_exercise_remaining(remaining)
@@ -291,6 +294,17 @@ class App:
     def _after_exercise(self):
         self._exercise_elapsed = 0
         self._exercise_showing = False
+
+    def _on_stand_up(self):
+        self._is_standing = True
+        self._clock.set_standing(True)
+
+    def _on_sit_down(self):
+        self._is_standing = False
+        self._exercise_elapsed = 0   # 坐下重新開始計時
+        remaining = self._exercise_interval_s
+        self._clock.set_exercise_remaining(remaining)
+        self._clock.set_standing(False)
 
     # ── 喝水提醒 ─────────────────────────────────────
 

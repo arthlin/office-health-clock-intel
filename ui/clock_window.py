@@ -301,16 +301,20 @@ class ClockWindow:
     - 圖標化系統監控
     """
 
-    def __init__(self, root: tk.Tk, settings: dict, on_close, on_settings, on_drink=None, on_minimize=None):
+    def __init__(self, root: tk.Tk, settings: dict, on_close, on_settings,
+                 on_drink=None, on_minimize=None, on_stand_up=None, on_sit_down=None):
         self._root = root
         self._settings = settings
         self._on_close = on_close
         self._on_settings = on_settings
         self._on_drink = on_drink
         self._on_minimize = on_minimize
+        self._on_stand_up = on_stand_up
+        self._on_sit_down = on_sit_down
 
         self._exercise_remaining = settings.get("exercise_interval_minutes", 50) * 60
         self._exercise_interval = settings.get("exercise_interval_minutes", 50) * 60
+        self._is_standing = False
         self._water_total = 0
         self._water_target = settings.get("water_target_ml", 2000)
         self._med_taken = False
@@ -353,6 +357,26 @@ class ClockWindow:
         if hasattr(self, "_water_menu"):
             self._water_menu.tk_popup(event.x_root, event.y_root)
 
+    def _show_timer_menu(self, event):
+        # 動態調整選單狀態（灰掉已在的狀態）
+        if self._is_standing:
+            self._timer_menu.entryconfig(0, state="disabled")
+            self._timer_menu.entryconfig(1, state="normal")
+        else:
+            self._timer_menu.entryconfig(0, state="normal")
+            self._timer_menu.entryconfig(1, state="disabled")
+        self._timer_menu.tk_popup(event.x_root, event.y_root)
+
+    def _do_stand_up(self):
+        self._is_standing = True
+        if self._on_stand_up:
+            self._on_stand_up()
+
+    def _do_sit_down(self):
+        self._is_standing = False
+        if self._on_sit_down:
+            self._on_sit_down()
+
     # ── 公開 API ──────────────────────────────────────────
 
     def tick(self):
@@ -367,6 +391,9 @@ class ClockWindow:
 
     def set_exercise_remaining(self, seconds: int):
         self._exercise_remaining = seconds
+
+    def set_standing(self, is_standing: bool):
+        self._is_standing = is_standing
 
     def set_water(self, total_ml: int, target_ml: int, last_time: str | None = None):
         self._water_total = total_ml
@@ -551,7 +578,17 @@ class ClockWindow:
         timer_f.pack(side="left", padx=(0, 12))
         self._timer_indicator = GaugeIndicator(timer_f, size=64, color=config.COLOR_TIMER)
         self._timer_indicator.pack()
-        tk.Label(timer_f, text="⏱ 久坐", font=config.FONT_SMALL, fg=config.TEXT_SECONDARY, bg=config.BG_COLOR).pack(pady=(2, 0))
+        lbl_timer = tk.Label(timer_f, text="⏱ 久坐", font=config.FONT_SMALL, fg=config.TEXT_SECONDARY, bg=config.BG_COLOR)
+        lbl_timer.pack(pady=(2, 0))
+
+        # 右鍵選單：起身 / 坐下
+        self._timer_menu = tk.Menu(self._root, tearoff=False, bg=config.BG_SECONDARY,
+                                   fg=config.TEXT_PRIMARY, activebackground=config.BG_TERTIARY,
+                                   activeforeground=config.TEXT_PRIMARY, font=config.FONT_BTN)
+        self._timer_menu.add_command(label="🧍 起身（暫停計時）", command=self._do_stand_up)
+        self._timer_menu.add_command(label="🪑 坐下（重新計時）", command=self._do_sit_down)
+        for widget in (self._timer_indicator.canvas, lbl_timer):
+            widget.bind("<Button-3>", self._show_timer_menu)
 
         med_f = tk.Frame(left, bg=config.BG_COLOR)
         med_f.pack(side="left")
@@ -663,17 +700,23 @@ class ClockWindow:
     # ── 更新顯示 ──────────────────────────────────────────
 
     def _update_exercise_display(self):
+        if self._is_standing:
+            self._var_exercise.set("站立中 ✓")
+            self._lbl_exercise.config(fg=config.COLOR_WATER)
+            self._timer_indicator.update(0.0, "站", config.COLOR_WATER)
+            return
+
         s = max(0, self._exercise_remaining)
         total = self._exercise_interval
         m = (s % 3600) // 60
         sec = s % 60
         h = s // 3600
-        
+
         if h:
             txt = f"起身：{h:02d}:{m:02d}:{sec:02d}"
         else:
             txt = f"起身：{m:02d}:{sec:02d}"
-        
+
         # 顏色變化
         if s < 60:
             color = config.COLOR_WARN
@@ -681,10 +724,10 @@ class ClockWindow:
             color = config.COLOR_TIMER_HOVER
         else:
             color = config.COLOR_TIMER
-        
+
         self._var_exercise.set(txt)
         self._lbl_exercise.config(fg=color)
-        
+
         # 更新計時器指示器
         progress = 1.0 - (s / total) if total > 0 else 0
         self._timer_indicator.update(progress, f"{m:02d}:{sec:02d}", color)
