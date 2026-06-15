@@ -381,6 +381,12 @@ class ClockWindow:
         self._med_minute = minute
 
     def set_system_monitor(self, monitor):
+        # 第一次呼叫時，若 NVIDIA 狀態與目前 grid 不符，重建 sys grid
+        has_nvidia = getattr(monitor, "_has_nvml", False)
+        if has_nvidia != getattr(self, "_sys_has_nvidia", None):
+            self._sys_has_nvidia = has_nvidia
+            self._rebuild_sys_grid()
+
         self._sys_cpu_temp = monitor.cpu_temp
         self._sys_cpu_util = monitor.cpu_util
         self._sys_gpu_temp = monitor.gpu_temp
@@ -612,22 +618,35 @@ class ClockWindow:
 
         self._sys_grid = tk.Frame(self._main, bg=config.BG_COLOR)
         self._sys_grid.pack(fill="x", padx=16, pady=(0, 6))
+        self._rebuild_sys_grid()
+
+    def _rebuild_sys_grid(self):
+        for w in self._sys_grid.winfo_children():
+            w.destroy()
         self._sys_grid.columnconfigure(0, weight=1)
         self._sys_grid.columnconfigure(1, weight=1)
 
         self._cpu_card = SystemMetricCard(self._sys_grid, "CPU", "🧠", config.SYS_TEMP_OK)
         self._cpu_util_card = SystemMetricCard(self._sys_grid, "CPU%", "📊", config.SYS_BAR_CPU)
-        self._gpu_card = SystemMetricCard(self._sys_grid, "GPU", "🎮", config.SYS_TEMP_OK)
         self._ram_card = SystemMetricCard(self._sys_grid, "RAM", "🧩", config.SYS_BAR_RAM)
-        self._vram_card = SystemMetricCard(self._sys_grid, "VRAM", "🖼", config.SYS_BAR_VRAM)
-        self._cuda_card = SystemMetricCard(self._sys_grid, "CUDA", "⚡", config.SYS_BAR_CUDA)
 
         self._cpu_card.grid(row=0, column=0, sticky="ew", padx=(0, 4), pady=(0, 4))
         self._cpu_util_card.grid(row=0, column=1, sticky="ew", padx=(4, 0), pady=(0, 4))
-        self._gpu_card.grid(row=1, column=0, sticky="ew", padx=(0, 4), pady=(0, 4))
-        self._ram_card.grid(row=1, column=1, sticky="ew", padx=(4, 0), pady=(0, 4))
-        self._vram_card.grid(row=2, column=0, sticky="ew", padx=(0, 4), pady=(0, 4))
-        self._cuda_card.grid(row=2, column=1, sticky="ew", padx=(4, 0), pady=(0, 4))
+
+        self._gpu_card = None
+        self._vram_card = None
+        self._cuda_card = None
+
+        if getattr(self, "_sys_has_nvidia", False):
+            self._gpu_card = SystemMetricCard(self._sys_grid, "GPU", "🎮", config.SYS_TEMP_OK)
+            self._vram_card = SystemMetricCard(self._sys_grid, "VRAM", "🖼", config.SYS_BAR_VRAM)
+            self._cuda_card = SystemMetricCard(self._sys_grid, "CUDA", "⚡", config.SYS_BAR_CUDA)
+            self._ram_card.grid(row=1, column=0, sticky="ew", padx=(0, 4), pady=(0, 4))
+            self._gpu_card.grid(row=1, column=1, sticky="ew", padx=(4, 0), pady=(0, 4))
+            self._vram_card.grid(row=2, column=0, sticky="ew", padx=(0, 4), pady=(0, 4))
+            self._cuda_card.grid(row=2, column=1, sticky="ew", padx=(4, 0), pady=(0, 4))
+        else:
+            self._ram_card.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 4))
 
     def _toggle_sys(self):
         self._sys_collapsed = not self._sys_collapsed
@@ -715,13 +734,13 @@ class ClockWindow:
         # CPU 使用率
         self._cpu_util_card.update(f"{self._sys_cpu_util:.0f}%", self._sys_cpu_util / 100.0, config.SYS_BAR_CPU)
 
-        # GPU 溫度
-        if self._sys_gpu_temp is not None:
-            t = self._sys_gpu_temp
-            color = self._temp_color(t)
-            self._gpu_card.update(f"{t:.0f}°C", t / 100.0, color)
-        else:
-            self._gpu_card.update("--", None, config.SYS_TEMP_OK)
+        # GPU 溫度（僅 NVIDIA）
+        if self._gpu_card is not None:
+            if self._sys_gpu_temp is not None:
+                t = self._sys_gpu_temp
+                self._gpu_card.update(f"{t:.0f}°C", t / 100.0, self._temp_color(t))
+            else:
+                self._gpu_card.update("--", None, config.SYS_TEMP_OK)
 
         # RAM
         if self._sys_ram_total > 0:
@@ -733,18 +752,20 @@ class ClockWindow:
         else:
             self._ram_card.update("--", None, config.SYS_BAR_RAM)
 
-        # VRAM
-        if self._sys_vram_total > 0:
-            self._vram_card.update(
-                f"{self._sys_vram_used:.1f}/{self._sys_vram_total:.1f}G",
-                self._sys_vram_pct / 100.0,
-                config.SYS_BAR_VRAM,
-            )
-        else:
-            self._vram_card.update("--", None, config.SYS_BAR_VRAM)
+        # VRAM（僅 NVIDIA）
+        if self._vram_card is not None:
+            if self._sys_vram_total > 0:
+                self._vram_card.update(
+                    f"{self._sys_vram_used:.1f}/{self._sys_vram_total:.1f}G",
+                    self._sys_vram_pct / 100.0,
+                    config.SYS_BAR_VRAM,
+                )
+            else:
+                self._vram_card.update("--", None, config.SYS_BAR_VRAM)
 
-        # CUDA
-        self._cuda_card.update(f"{self._sys_gpu_util:.0f}%", self._sys_gpu_util / 100.0, config.SYS_BAR_CUDA)
+        # CUDA（僅 NVIDIA）
+        if self._cuda_card is not None:
+            self._cuda_card.update(f"{self._sys_gpu_util:.0f}%", self._sys_gpu_util / 100.0, config.SYS_BAR_CUDA)
 
     def _update_weather_display(self):
         temp_text = "--°C"

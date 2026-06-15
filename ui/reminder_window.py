@@ -2,6 +2,7 @@
 
 import tkinter as tk
 import math
+import os
 import winsound
 from collections.abc import Callable
 import config
@@ -9,10 +10,36 @@ from ui.effects import GlowEffect
 from ui.particles import ParticleSystem
 from ui.animations import EasingFunctions
 
+# 音效檔路徑：assets/alert.mp3 或 assets/alert.wav（放在專案根目錄的 assets/ 資料夾）
+_ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
+_ALERT_CANDIDATES = [
+    os.path.join(_ASSETS_DIR, "alert.mp3"),
+    os.path.join(_ASSETS_DIR, "alert.wav"),
+]
 
 def _play_alert():
+    for path in _ALERT_CANDIDATES:
+        if os.path.exists(path):
+            try:
+                import pygame
+                if not pygame.mixer.get_init():
+                    pygame.mixer.init()
+                pygame.mixer.music.load(path)
+                pygame.mixer.music.play()
+                return
+            except Exception:
+                pass
     try:
         winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+    except Exception:
+        pass
+
+
+def _stop_alert():
+    try:
+        import pygame
+        if pygame.mixer.get_init():
+            pygame.mixer.music.stop()
     except Exception:
         pass
 
@@ -343,6 +370,7 @@ class ReminderWindow:
             if closed[0]:
                 return
             closed[0] = True
+            _stop_alert()
             icon_widget.stop_animation()
             dlg.unbind_all("<Escape>")
             dlg.unbind_all("<Return>")

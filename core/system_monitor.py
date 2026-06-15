@@ -62,11 +62,13 @@ class SystemMonitor:
             return
         try:
             import clr
-            # 找到 DLL 路徑
             lhm_dir = self._find_lhm_dll()
             if not lhm_dir:
                 return
-            clr.AddReference(os.path.join(lhm_dir, "LibreHardwareMonitorLib"))
+            # 必須先把目錄加進 sys.path，pythonnet 才找得到命名空間
+            if lhm_dir not in sys.path:
+                sys.path.append(lhm_dir)
+            clr.AddReference("LibreHardwareMonitorLib")
             from LibreHardwareMonitor.Hardware import Computer
 
             computer = Computer()
@@ -81,6 +83,8 @@ class SystemMonitor:
     def _find_lhm_dll(self) -> str:
         """搜尋 LibreHardwareMonitorLib.dll 安裝路徑。"""
         candidates = [
+            # 使用者目錄安裝（無需管理員）
+            os.path.expandvars(r"%LOCALAPPDATA%\LibreHardwareMonitor"),
             # WinGet 安裝路徑
             os.path.expandvars(
                 r"%LOCALAPPDATA%\Microsoft\WinGet\Packages"
@@ -152,6 +156,8 @@ class SystemMonitor:
     def update(self):
         """重新讀取所有硬體數值並更新快取。"""
         self._update_gpu()
+        if not self._has_nvml:
+            self._update_gpu_lhm()
         self._update_cpu_temp()
         self._update_cpu_util()
         self._update_ram()
@@ -207,6 +213,46 @@ class SystemMonitor:
             pass
 
     # ── CPU 溫度 ──────────────────────────────────────────
+
+    def _update_gpu_lhm(self):
+        """透過 LHM 讀取 GPU 資料（支援 Intel / AMD 內顯）。"""
+        if not self._has_lhm or not self._lhm_computer:
+            return
+        try:
+            from LibreHardwareMonitor.Hardware import HardwareType, SensorType
+            for hw in self._lhm_computer.Hardware:
+                if hw.HardwareType not in (HardwareType.GpuNvidia,
+                                           HardwareType.GpuAmd,
+                                           HardwareType.GpuIntel):
+                    continue
+                hw.Update()
+                vram_total = vram_used = gpu_load = gpu_temp_val = None
+                for s in hw.Sensors:
+                    if s.Value is None:
+                        continue
+                    t = s.SensorType
+                    n = s.Name.lower()
+                    if t == SensorType.Temperature:
+                        gpu_temp_val = float(s.Value)
+                    elif t == SensorType.SmallData and "total" in n:
+                        vram_total = float(s.Value) / 1024  # MB→GB
+                    elif t == SensorType.SmallData and "used" in n:
+                        vram_used = float(s.Value) / 1024
+                    elif t == SensorType.Load and ("3d" in n or "gpu core" in n or "d3d 3d" in n):
+                        gpu_load = float(s.Value)
+                if gpu_temp_val is not None:
+                    self.gpu_temp = gpu_temp_val
+                if vram_total:
+                    self.vram_total = vram_total
+                if vram_used is not None:
+                    self.vram_used = vram_used
+                    if vram_total:
+                        self.vram_pct = vram_used / vram_total * 100
+                if gpu_load is not None:
+                    self.gpu_util = gpu_load
+                break
+        except Exception:
+            pass
 
     def _update_cpu_temp(self):
         """讀取 CPU 溫度，僅接受 > 0 且 < 150 的有效值。"""
