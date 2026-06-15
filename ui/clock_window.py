@@ -584,11 +584,13 @@ class ClockWindow:
         lbl_timer.pack(pady=(2, 0))
 
         # 右鍵選單：起身 / 坐下
-        self._timer_menu = tk.Menu(self._root, tearoff=False, bg=config.BG_SECONDARY,
-                                   fg=config.TEXT_PRIMARY, activebackground=config.BG_TERTIARY,
-                                   activeforeground=config.TEXT_PRIMARY, font=config.FONT_BTN)
-        self._timer_menu.add_command(label="🧍 起身（暫停計時）", command=self._do_stand_up)
-        self._timer_menu.add_command(label="🪑 坐下（重新計時）", command=self._do_sit_down)
+        self._timer_menu = tk.Menu(self._root, tearoff=False,
+                                   bg="#1e293b", fg="#ffffff",
+                                   activebackground="#3b82f6", activeforeground="#ffffff",
+                                   font=("Segoe UI", 11, "bold"),
+                                   borderwidth=0, relief="flat")
+        self._timer_menu.add_command(label="  起身  暫停計時", command=self._do_stand_up)
+        self._timer_menu.add_command(label="  坐下  重新計時", command=self._do_sit_down)
         for widget in (self._timer_indicator.canvas, lbl_timer):
             widget.bind("<Button-3>", self._show_timer_menu)
 
