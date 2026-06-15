@@ -28,12 +28,18 @@ class WeatherSnapshot:
 class WeatherService:
     """Fetches local weather from Open-Meteo without an API key."""
 
-    def __init__(self, refresh_ttl_minutes: int = 120):
+    def __init__(self, refresh_ttl_minutes: int = 120, location_override: str = ""):
         self._refresh_ttl = timedelta(minutes=refresh_ttl_minutes)
         self._lock = threading.Lock()
         self._snapshot: WeatherSnapshot | None = None
         self._last_refresh: datetime | None = None
         self._location_cache: dict[str, object] | None = None
+        self._location_override = location_override.strip()
+
+    def set_location_override(self, name: str):
+        self._location_override = name.strip()
+        with self._lock:
+            self._snapshot = None   # 強制下次重抓
 
     def get_snapshot(self, force: bool = False) -> WeatherSnapshot:
         now = datetime.now()
@@ -89,6 +95,12 @@ class WeatherService:
         )
 
     def _detect_location(self) -> dict[str, object] | None:
+        if self._location_override:
+            location = self._geocode(self._location_override)
+            if location:
+                self._location_cache = location
+                return location
+
         location = self._detect_location_via_ip()
         if location:
             self._location_cache = location
@@ -100,6 +112,36 @@ class WeatherService:
             return location
 
         return self._location_cache
+
+    @staticmethod
+    def _geocode(query: str) -> dict[str, object] | None:
+        """Nominatim 正向地理編碼，將地名轉換為 lat/lon。"""
+        import urllib.parse, urllib.request, json, ssl
+        params = urllib.parse.urlencode({
+            "q": query + " 台灣",
+            "format": "json",
+            "limit": 1,
+            "accept-language": "zh-TW",
+        })
+        url = f"https://nominatim.openstreetmap.org/search?{params}"
+        req = urllib.request.Request(url, headers={"User-Agent": "office-health-clock/1.0"})
+        for ctx in (None, ssl._create_unverified_context()):
+            try:
+                kw = {"timeout": 5} if ctx is None else {"timeout": 5, "context": ctx}
+                with urllib.request.urlopen(req, **kw) as resp:
+                    results = json.loads(resp.read().decode("utf-8"))
+                if not results:
+                    return None
+                r = results[0]
+                return {
+                    "name": query,
+                    "lat": float(r["lat"]),
+                    "lon": float(r["lon"]),
+                    "timezone": "Asia/Taipei",
+                }
+            except Exception:
+                continue
+        return None
 
     def _detect_location_via_ip(self) -> dict[str, object] | None:
         urls = [

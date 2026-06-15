@@ -78,6 +78,7 @@ def show_settings_dialog(root: tk.Tk, settings: dict, on_save):
     content_frame.pack(fill="both", expand=True)
 
     fields = [
+        ("天氣地點（空白=自動）", "location_override", str),
         ("每日喝水目標 (ml)", "water_target_ml", int),
         ("下班小時 (0-23)", "end_of_work_hour", int),
         ("下班分鐘 (0-59)", "end_of_work_minute", int),
@@ -201,7 +202,9 @@ class App:
         self._tracker = WaterTracker(self._settings["water_target_ml"])
         self._reminder = ReminderWindow(self._root)
         self._sys_monitor = SystemMonitor()
-        self._weather_service = WeatherService()
+        self._weather_service = WeatherService(
+            location_override=self._settings.get("location_override", "")
+        )
 
         self._exercise_elapsed = 0   # 已坐秒數
         self._exercise_interval_s = self._settings["exercise_interval_minutes"] * 60
@@ -508,6 +511,9 @@ class App:
             self._schedule_med_reminder()
             self._sync_med_display()
             self._sync_water_display()
+            # 更新天氣地點並立刻重抓
+            self._weather_service.set_location_override(new_settings.get("location_override", ""))
+            self._start_weather_tick()
 
         show_settings_dialog(self._root, self._settings, on_save=_save)
 

@@ -149,6 +149,7 @@ DEFAULT_SETTINGS = {
     "window_y": -1,
     "window_w": 160,
     "window_h": 420,
+    "location_override": "",
 }
 
 # 喝水快選量（ml）
