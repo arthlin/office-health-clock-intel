@@ -158,12 +158,52 @@ class WeatherService:
                 if isinstance(timezone, dict):
                     timezone = timezone.get("id") or "auto"
 
+                # 嘗試用 Nominatim 取得更精確的中文行政區
+                precise = self._reverse_geocode(float(lat), float(lon))
+                if precise:
+                    name = precise
+
                 return {
                     "name": name,
                     "lat": float(lat),
                     "lon": float(lon),
                     "timezone": timezone,
                 }
+            except Exception:
+                continue
+        return None
+
+    @staticmethod
+    def _reverse_geocode(lat: float, lon: float) -> str | None:
+        """Nominatim 反向地理編碼，取得中文縣市＋行政區。"""
+        import urllib.request, urllib.error, json, ssl
+        url = (
+            f"https://nominatim.openstreetmap.org/reverse"
+            f"?lat={lat}&lon={lon}&format=json&accept-language=zh-TW"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "office-health-clock/1.0"})
+        for ctx in (None, ssl._create_unverified_context()):
+            try:
+                kw = {"timeout": 5} if ctx is None else {"timeout": 5, "context": ctx}
+                with urllib.request.urlopen(req, **kw) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                addr = data.get("address", {})
+                city = (
+                    addr.get("city")
+                    or addr.get("county")
+                    or addr.get("state")
+                    or ""
+                )
+                district = (
+                    addr.get("city_district")
+                    or addr.get("suburb")
+                    or addr.get("town")
+                    or addr.get("village")
+                    or ""
+                )
+                if city and district:
+                    return f"{city}{district}"
+                return city or None
             except Exception:
                 continue
         return None
