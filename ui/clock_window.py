@@ -531,13 +531,6 @@ class ClockWindow:
                  font=config.FONT_TITLE,
                  fg=config.TEXT_PRIMARY, bg=config.BG_SECONDARY).pack(side="left", padx=6)
 
-        # 時鐘（放在標題與設定之間）
-        self._var_time = tk.StringVar(value="--:--:--")
-        self._lbl_time = tk.Label(bar, textvariable=self._var_time,
-                                  font=("Consolas", 11, "bold"),
-                                  fg=config.CLOCK_COLOR, bg=config.BG_SECONDARY)
-        self._lbl_time.pack(side="left", padx=6)
-
         # 設定按鈕
         cfg_btn = tk.Label(bar, text="⚙ 設定", font=config.FONT_LABEL,
                            fg=config.TEXT_SECONDARY, bg=config.BG_SECONDARY,
@@ -551,9 +544,15 @@ class ClockWindow:
         bar.bind("<B1-Motion>", self._do_drag)
 
     def _build_clock_area(self):
+        # 大時鐘顯示列
+        self._var_time = tk.StringVar(value="--:--:--")
+        tk.Label(self._main, textvariable=self._var_time,
+                 font=("Consolas", 28, "bold"),
+                 fg=config.CLOCK_COLOR, bg=config.BG_COLOR).pack(pady=(8, 0))
+
         # 左右並排：左邊指示器，右邊天氣+日期
         row1 = tk.Frame(self._main, bg=config.BG_COLOR)
-        row1.pack(fill="x", padx=16, pady=(8, 4))
+        row1.pack(fill="x", padx=16, pady=(6, 4))
         row1.columnconfigure(0, weight=1)
         row1.columnconfigure(1, weight=0)
 
